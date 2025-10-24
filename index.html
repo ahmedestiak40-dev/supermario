@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Mario: Chrono Kingdom Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        body {
+            background-color: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Press Start 2P', cursive;
+            color: #ffffff;
+        }
+
+        #game-container {
+            border: 8px solid #a82045;
+            box-shadow: 0 0 30px rgba(168, 32, 69, 0.7);
+            border-radius: 12px;
+            background: #2c081e;
+            overflow: hidden;
+            max-width: 90vw;
+        }
+
+        #gameCanvas {
+            background: linear-gradient(to bottom, #7c93cc, #5a77b7); /* Sky gradient */
+            display: block;
+            touch-action: none; /* Disable default touch actions */
+        }
+
+        .ui-panel {
+            background-color: #a82045;
+            padding: 1rem;
+            width: 100%;
+            text-align: center;
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+        }
+
+        .title-text {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #ffe066;
+            text-shadow: 2px 2px #000000;
+        }
+
+        .instruction-text {
+            font-size: 0.6rem;
+            color: #ffffff;
+            margin-top: 0.5rem;
+        }
+
+        /* Message Box Styling */
+        #messageBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.85);
+            border: 4px solid #ffe066;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            box-shadow: 0 0 20px rgba(255, 224, 102, 0.5);
+        }
+
+        #messageBox button {
+            background-color: #a82045;
+            color: white;
+            border: 2px solid #ffe066;
+            padding: 5px 15px;
+            font-family: 'Press Start 2P', cursive;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background-color 0.1s;
+        }
+
+        #messageBox button:hover {
+            background-color: #c93b62;
+        }
+
+        /* Time Shift Screen Effect */
+        #timeShiftOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            background-color: #3f72af; /* Chrono blue */
+            transition: opacity 0.05s ease-in-out;
+            z-index: 99;
+        }
+
+        .shifted {
+            opacity: 0.7 !important;
+        }
+
+        /* Responsive Mobile Controls */
+        #mobile-controls {
+            display: flex;
+            justify-content: space-around;
+            width: 90vw;
+            max-width: 500px;
+            margin-top: 1rem;
+        }
+
+        .ctrl-button {
+            background-color: #ff5757;
+            color: white;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            font-size: 0.6rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 4px solid #a82045;
+            box-shadow: 0 4px #a82045;
+            transition: transform 0.1s;
+        }
+        
+        .ctrl-button:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 #a82045;
+        }
+
+        #time-shift-btn {
+            background-color: #3f72af;
+            border: 4px solid #1a3a60;
+            box-shadow: 0 4px #1a3a60;
+            width: 90px;
+            height: 90px;
+            font-size: 0.7rem;
+        }
+        
+        #time-shift-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 #1a3a60;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="timeShiftOverlay"></div>
+        <div class="ui-panel">
+            <div class="title-text">CHRONO KINGDOM</div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="mobile-controls">
+        <div id="left-btn" class="ctrl-button">LEFT</div>
+        <div id="jump-btn" class="ctrl-button">JUMP</div>
+        <div id="right-btn" class="ctrl-button">RIGHT</div>
+        <div id="time-shift-btn" class="ctrl-button">TIME SHIFT (Y)</div>
+    </div>
+    
+    <div id="messageBox">
+        <p id="messageText"></p>
+        <button onclick="closeMessageBox()">OK</button>
+    </div>
+
+    <script>
+        // --- GAME CONSTANTS AND INITIALIZATION ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const shiftOverlay = document.getElementById('timeShiftOverlay');
+
+        // Set canvas size (will be scaled by CSS, but internal resolution is fixed)
+        const GAME_WIDTH = 800;
+        const GAME_HEIGHT = 400;
+        canvas.width = GAME_WIDTH;
+        canvas.height = GAME_HEIGHT;
+
+        // Gravity and Movement Settings
+        const GRAVITY = 0.6;
+        const JUMP_VELOCITY = -12;
+        const MOVE_SPEED = 5;
+
+        // Time Shift Settings
+        const SHIFT_DURATION = 15; // Frames (approx 250ms)
+        let timeShiftTimer = 0;
+        let isTimeShifted = false;
+
+        // --- GAME STATE ---
+        let keys = {};
+        let mobileControls = {}; // Tracks mobile button presses
+
+        const Mario = {
+            x: 50,
+            y: GAME_HEIGHT - 50,
+            width: 32,
+            height: 48,
+            vx: 0,
+            vy: 0,
+            onGround: false,
+            color: '#e74c3c' // Mario Red
+        };
+
+        // Platform structure: { x, y, width, height, type }
+        const Platforms = [
+            // Standard Ground
+            { x: 0, y: GAME_HEIGHT - 30, width: 250, height: 30, type: 'solid', color: '#8f4f34' },
+            { x: 500, y: GAME_HEIGHT - 30, width: 300, height: 30, type: 'solid', color: '#8f4f34' },
+
+            // Time-Sensitive Platform (Initial state: hidden/shifted up)
+            // Normal State: Hidden (y=1000 or outside map)
+            // Shifted State: Visible (y=GAME_HEIGHT - 80)
+            { 
+                x: 350, y: 1000, width: 100, height: 20, 
+                type: 'time-sensitive', 
+                color: '#3f72af', // Chrono Blue
+                normalY: 1000, 
+                shiftedY: GAME_HEIGHT - 80,
+                isCollisionTarget: false // Only a target when shifted
+            }
+        ];
+
+        // --- CONTROLS AND EVENT LISTENERS ---
+
+        // Keyboard mapping (W/A/D/Y)
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (e.key === 'y' || e.key === 'Y') {
+                activateTimeShift();
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        // Mobile Controls Setup
+        function setupMobileControls() {
+            const controls = [
+                { id: 'left-btn', key: 'a' },
+                { id: 'right-btn', key: 'd' },
+                { id: 'jump-btn', key: 'w' },
+                { id: 'time-shift-btn', key: 'y' }
+            ];
+
+            controls.forEach(control => {
+                const element = document.getElementById(control.id);
+                if (element) {
+                    const startHandler = () => { mobileControls[control.key] = true; if (control.key === 'y') activateTimeShift(); };
+                    const endHandler = () => { mobileControls[control.key] = false; };
+
+                    // Touch events
+                    element.addEventListener('touchstart', (e) => { e.preventDefault(); startHandler(); }, { passive: false });
+                    element.addEventListener('touchend', endHandler, { passive: false });
+                    
+                    // Mouse events (for desktop testing)
+                    element.addEventListener('mousedown', startHandler);
+                    element.addEventListener('mouseup', endHandler);
+                    element.addEventListener('mouseleave', endHandler); // Important for safety
+                }
+            });
+        }
+        setupMobileControls();
+
+        // --- GAME LOGIC FUNCTIONS ---
+
+        function updateMario() {
+            // Apply horizontal movement
+            Mario.vx = 0;
+            if (keys['a'] || keys['A'] || mobileControls['a']) {
+                Mario.vx = -MOVE_SPEED;
+            }
+            if (keys['d'] || keys['D'] || mobileControls['d']) {
+                Mario.vx = MOVE_SPEED;
+            }
+
+            // Apply jump
+            if ((keys['w'] || keys['W'] || keys[' ']) && Mario.onGround || mobileControls['w'] && Mario.onGround) {
+                Mario.vy = JUMP_VELOCITY;
+                Mario.onGround = false;
+            }
+
+            // Apply gravity
+            Mario.vy += GRAVITY;
+
+            // Update position
+            Mario.x += Mario.vx;
+            Mario.y += Mario.vy;
+            
+            // Reset onGround flag
+            Mario.onGround = false;
+
+            // Handle collision
+            checkCollisions();
+
+            // Check if Mario fell off the bottom (Game Over Condition)
+            if (Mario.y > GAME_HEIGHT) {
+                showMessageBox("TIME ANOMALY! Mario fell into the void. Press OK to retry.", resetGame);
+            }
+        }
+
+        function checkCollisions() {
+            let nextOnGround = false;
+            
+            Platforms.forEach(platform => {
+                // Skip collision check if the platform is not a target
+                if (platform.type === 'time-sensitive' && !platform.isCollisionTarget) {
+                    return;
+                }
+
+                if (
+                    Mario.x < platform.x + platform.width &&
+                    Mario.x + Mario.width > platform.x &&
+                    Mario.y < platform.y + platform.height &&
+                    Mario.y + Mario.height > platform.y
+                ) {
+                    // Collision detected
+                    
+                    // Determine which side collision occurred
+                    let overlapX = Math.min(Mario.x + Mario.width, platform.x + platform.width) - Math.max(Mario.x, platform.x);
+                    let overlapY = Math.min(Mario.y + Mario.height, platform.y + platform.height) - Math.max(Mario.y, platform.y);
+
+                    if (overlapX < overlapY) {
+                        // Horizontal collision (only necessary if Mario is moving fast horizontally, but keeping it simple)
+                        if (Mario.vx > 0) {
+                            Mario.x = platform.x - Mario.width;
+                        } else if (Mario.vx < 0) {
+                            Mario.x = platform.x + platform.width;
+                        }
+                    } else {
+                        // Vertical collision
+                        if (Mario.vy > 0) {
+                            // Hit from top (Landing)
+                            Mario.y = platform.y - Mario.height;
+                            Mario.vy = 0;
+                            nextOnGround = true;
+                        } else if (Mario.vy < 0) {
+                            // Hit from bottom
+                            Mario.y = platform.y + platform.height;
+                            Mario.vy = 0;
+                        }
+                    }
+                }
+            });
+            Mario.onGround = nextOnGround;
+        }
+
+        function activateTimeShift() {
+            if (!isTimeShifted) {
+                isTimeShifted = true;
+                timeShiftTimer = SHIFT_DURATION;
+                shiftOverlay.classList.add('shifted');
+                
+                // Update time-sensitive platforms to their shifted state (visible/active)
+                Platforms.forEach(p => {
+                    if (p.type === 'time-sensitive') {
+                        p.y = p.shiftedY;
+                        p.isCollisionTarget = true;
+                    }
+                });
+            }
+        }
+
+        function updateTimeShift() {
+            if (isTimeShifted) {
+                timeShiftTimer--;
+
+                if (timeShiftTimer <= 0) {
+                    isTimeShifted = false;
+                    shiftOverlay.classList.remove('shifted');
+
+                    // Revert time-sensitive platforms to their normal state (hidden/inactive)
+                    Platforms.forEach(p => {
+                        if (p.type === 'time-sensitive') {
+                            p.y = p.normalY;
+                            p.isCollisionTarget = false;
+                        }
+                    });
+                }
+            }
+        }
+
+        // --- RENDERING FUNCTIONS ---
+
+        function drawMario() {
+            ctx.fillStyle = Mario.color;
+            ctx.fillRect(Mario.x, Mario.y, Mario.width, Mario.height);
+            
+            // Simple cap/visor for visual flair
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(Mario.x + 4, Mario.y + 4, Mario.width - 8, 8);
+        }
+
+        function drawPlatforms() {
+            Platforms.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, p.width, p.height);
+                
+                // Draw a simple grid/texture for platforms
+                ctx.strokeStyle = '#00000050';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(p.x, p.y, p.width, p.height);
+            });
+        }
+        
+        function drawInstructions() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(10, 10, GAME_WIDTH - 20, 50);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '10px "Press Start 2P"';
+            ctx.fillText("Reach the right platform!", 20, 30);
+            ctx.fillText("Press 'Y' (or the button) to TIME SHIFT!", 20, 50);
+        }
+
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            // Draw Platforms
+            drawPlatforms();
+
+            // Draw Mario
+            drawMario();
+            
+            // Draw Instructions
+            drawInstructions();
+        }
+
+        // --- GAME LOOP ---
+        function gameLoop() {
+            updateMario();
+            updateTimeShift();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- UTILITY AND GAME FLOW ---
+
+        function showMessageBox(text, callback) {
+            const box = document.getElementById('messageBox');
+            document.getElementById('messageText').innerText = text;
+            box.style.display = 'block';
+            box.querySelector('button').onclick = () => {
+                closeMessageBox();
+                if (callback) callback();
+            };
+        }
+
+        function closeMessageBox() {
+            document.getElementById('messageBox').style.display = 'none';
+        }
+
+        function resetGame() {
+            Mario.x = 50;
+            Mario.y = GAME_HEIGHT - 50;
+            Mario.vx = 0;
+            Mario.vy = 0;
+            Mario.onGround = false;
+            
+            // Ensure Time Shift is reset
+            isTimeShifted = false;
+            timeShiftTimer = 0;
+            shiftOverlay.classList.remove('shifted');
+            Platforms.forEach(p => {
+                if (p.type === 'time-sensitive') {
+                    p.y = p.normalY;
+                    p.isCollisionTarget = false;
+                }
+            });
+        }
+        
+        // Ensure the game starts when the window loads
+        window.onload = function () {
+            resetGame(); // Set initial state
+            gameLoop(); // Start the animation loop
+        }
+    </script>
+</body>
+</html>
